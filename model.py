@@ -77,7 +77,7 @@ def tud_realdata(data_path:str='data',dataset_name:str='MUTAG',num_gae_feats=21)
     ret['num_samples'] = len(dataset)
     ret['all_num_nodes'] = list(map(lambda s:s.num_nodes,dataset))
     ret['median_num_nodes'] = int(np.median(ret['all_num_nodes']))
-    ret['dataset'] = list(map(lambda data:NodeFeatData(edge_index=data.edge_index,X=data.x,Y=data.y),dataset))
+    ret['dataset'] = list(map(lambda data:NodeFeatData(N=data.num_nodes,edge_index=data.edge_index,X=data.x,Y=data.y),dataset))
 
     return ret
 
@@ -168,16 +168,17 @@ def generate_synthdata_er_ksbm(num_samples:int, num_feats:int, num_nodes:int,
 # LSE GAE
 
 class NodeFeatData():
-    def __init__(self,A=None,edge_index=None,F=None,X=None,Y=None):
+    def __init__(self,N=None,A=None,edge_index=None,F=None,X=None,Y=None):
         assert A is not None or edge_index is not None, "Must provide graph structure via adjacency matrix `A` or edge list `edge_index`."
         assert ((A is None)-.5)*((edge_index is None)-.5) < 0, "Either provide `A` or `edge_index`, but not both."
         assert X is not None, "Features `X` are missing."
         assert Y is not None, "Label `Y` is missing."
 
         if edge_index is not None:
-            A = to_dense_adj(edge_index)[0]
+            A = to_dense_adj(edge_index, max_num_nodes =N)[0]
         self.A = A
         self.num_nodes = A.shape[0]
+        assert self.num_nodes == N
         self.Ah = A + torch.eye(self.num_nodes)
 
         if F is None:
@@ -461,23 +462,23 @@ class MLPGClas(torch.nn.Module):
         super(MLPGClas, self).__init__()
         dim = num_hidden
 
-        self.conv1 = Sequential(Linear(num_features, dim, bias=False), ReLU())
+        self.conv1 = Sequential(Linear(num_features, dim), ReLU())
         self.bn1 = torch.nn.BatchNorm1d(dim)
 
-        self.conv2 = Sequential(Linear(dim, dim, bias=False), ReLU())
+        self.conv2 = Sequential(Linear(dim, dim), ReLU())
         self.bn2 = torch.nn.BatchNorm1d(dim)
 
-        self.conv3 = Sequential(Linear(dim, dim, bias=False), ReLU())
+        self.conv3 = Sequential(Linear(dim, dim), ReLU())
         self.bn3 = torch.nn.BatchNorm1d(dim)
 
-        self.conv4 = Sequential(Linear(dim, dim, bias=False), ReLU())
+        self.conv4 = Sequential(Linear(dim, dim), ReLU())
         self.bn4 = torch.nn.BatchNorm1d(dim)
 
-        self.conv5 = Sequential(Linear(dim, dim, bias=False), ReLU())
+        self.conv5 = Sequential(Linear(dim, dim), ReLU())
         self.bn5 = torch.nn.BatchNorm1d(dim)
 
-        self.fc1 = Linear(dim, dim, bias=False)
-        self.fc2 = Linear(dim, num_classes, bias=False)
+        self.fc1 = Linear(dim, dim)
+        self.fc2 = Linear(dim, num_classes)
 
     def forward(self, x, _, batch):
         x = torch.nn.functional.relu(self.conv1(x))
