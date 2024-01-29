@@ -1,0 +1,16 @@
+{
+    "seed":1212,
+
+    "num_data_feats": 10,
+    "num_nodes": 40,
+    "filt_order": 3,
+
+    "num_samples": 300,
+    "num_classes": 2,
+
+    "LINK_LAB_SIG": false,
+    "LINK_LAB_STRUC": true,
+    "LINK_SIG_STRUC": false,
+
+    "num_trials": 1
+}

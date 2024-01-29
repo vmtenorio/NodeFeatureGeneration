@@ -1,0 +1,34 @@
+{
+    "seed":1212,
+
+    "train_ratio": 0.6,
+    "miss_ratio": 0.2,
+    "val_ratio": 0.1,
+
+    "gae_hid_dim": 128,
+    "gae_lat_dim": 15,
+    "gae_n_layers": 2,
+    "gae_lmbda": 5e-4,
+    "gae_epochs": 500,
+    "gae_lr": 0.1,
+    "gae_gamma": 0.9,
+    "gae_patience": 50,
+
+    "gnn_hid_dim": 32,
+    "gnn_lr": 0.01,
+    "gnn_epochs": 200,
+    "gnn_lmbda": 5e-4,
+    "gnn_gamma": 0.9,
+    "gnn_patience": 30,
+
+    "batch_train_size": 32,
+    "batch_miss_size": 16,
+    "batch_val_size": 16,
+    "batch_test_size": 16,
+
+    "PRED_FEAT_TYPES": ["true","zeros","ones","random","degree","lse"],
+    "k_graph": 3,
+    "k_node": 3,
+
+    "num_trials": 3
+}
