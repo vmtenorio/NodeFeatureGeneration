@@ -1,4 +1,6 @@
 from utils import *
+import commentjson as json
+import os
 import torch
 
 from torch_geometric.datasets import TUDataset
@@ -68,7 +70,7 @@ def load_model_params(config_name:str):
 def batch_inds(list_inds,batch_size:int):
     return list(map(lambda i:list_inds[i],np.random.permutation(len(list_inds))[:batch_size]))
 
-def tud_realdata(data_path:str='data',dataset_name:str='MUTAG',num_gae_feats=21):
+def tud_realdata(data_path:str='data',dataset_name:str='MUTAG'):
     dataset = TUDataset(data_path+'/'+dataset_name, name=dataset_name)
 
     ret = dict()
@@ -77,7 +79,7 @@ def tud_realdata(data_path:str='data',dataset_name:str='MUTAG',num_gae_feats=21)
     ret['num_samples'] = len(dataset)
     ret['all_num_nodes'] = list(map(lambda s:s.num_nodes,dataset))
     ret['median_num_nodes'] = int(np.median(ret['all_num_nodes']))
-    ret['dataset'] = list(map(lambda data:NodeFeatData(N=data.num_nodes,edge_index=data.edge_index,X=data.x,Y=data.y),dataset))
+    ret['dataset'] = list(map(lambda data:NodeFeatData(edge_index=data.edge_index,X=data.x,Y=data.y),dataset))
 
     return ret
 
@@ -85,12 +87,6 @@ def generate_synthdata(num_samples:int, num_feats:int, num_nodes:int, filt_order
                        LINK_LAB_SIG:bool, LINK_LAB_STRUC:bool, LINK_SIG_STRUC:bool):
     Y = torch.tensor(np.random.binomial(1,.5,num_samples))
 
-    if LINK_LAB_SIG:
-        X = [np.random.normal((Y[i]*2-1)*.03,1,(num_nodes,num_feats)) for i in range(num_samples)]
-    else:
-        Z = torch.tensor(np.random.binomial(1,.5,num_samples))
-        X = [np.random.normal((Z[i]*2-1)*.04,1,(num_nodes,num_feats)) for i in range(num_samples)]
-    
     def W1(N:int=num_nodes):
         u = np.random.rand(num_nodes)
         prob_mat = .7*(u[:,None]*u[None]) + .3*((u[:,None]+u[None])/2)
@@ -99,7 +95,6 @@ def generate_synthdata(num_samples:int, num_feats:int, num_nodes:int, filt_order
         u = np.random.rand(num_nodes)
         prob_mat = .3*(u[:,None]*u[None]) + .7*((u[:,None]+u[None])/2)
         return lowtri2mat(np.random.binomial(1,mat2lowtri(prob_mat)))
-        # return lowtri2mat(np.random.binomial(1,mat2lowtri((u[:,None]*u[None])**2)))
 
     if LINK_LAB_STRUC:
         A = [W1(num_nodes) if not Y[i] else W2(num_nodes) for i in range(num_samples)]
@@ -108,47 +103,20 @@ def generate_synthdata(num_samples:int, num_feats:int, num_nodes:int, filt_order
         A = [W1(num_nodes) if not Z[i] else W2(num_nodes) for i in range(num_samples)]
 
     if LINK_SIG_STRUC:
-        
-        filt_taps = np.random.rand(filt_order)*.1
-        filt_taps[0] = 1
-        filt_taps = filt_taps/np.sum(filt_taps)
-        H = [np.sum([filt_taps[l]*np.linalg.matrix_power(A[i],l) for l in range(filt_order)],axis=0) for i in range(num_samples)]
-        X = [H[i]@X[i] for i in range(num_samples)]
+        feat_mean = [np.mean([compute_ls_feat(A[i],ls_type) for ls_type in LS_FEAT_LIST],axis=0) for i in range(num_samples)]
+    else:
+        # feat_mean = [np.mean([compute_ls_feat(A[i],ls_type) for ls_type in LS_FEAT_LIST],axis=0) for i in range(num_samples)]
+        # feat_mean = [feat_mean[i][np.random.permutation(num_nodes)] for i in range(num_samples)]
+        feat_mean = [np.random.rand(num_nodes) for i in range(num_samples)]
 
-    to_tensor = lambda x:torch.tensor(x).float()
-    A = list(map(to_tensor,A))
-    X = list(map(to_tensor,X))
-
-    ret = dict()
-    ret['num_classes'] = 2
-    ret['num_data_feats'] = num_feats
-    ret['num_samples'] = num_samples
-    ret['all_num_nodes'] = [num_nodes]*num_samples
-    ret['median_num_nodes'] = int(np.median(ret['all_num_nodes']))
-    ret['dataset'] = list(map(lambda i:NodeFeatData(A[i],F=None,X=X[i],Y=Y[i]),np.arange(num_samples)))
-
-    return ret
-
-def generate_synthdata_er_ksbm(num_samples:int, num_feats:int, num_nodes:int,
-                               edge_prob, num_blocks:int, in_prob, out_prob, filt_order:int,
-                               LINK_LAB_SIG:bool, LINK_LAB_STRUC:bool, LINK_SIG_STRUC:bool):
-    Y = torch.tensor(np.random.binomial(1,.5,num_samples))
-
+    mean_weight = .07
     if LINK_LAB_SIG:
-        X = [np.random.normal((Y[i]*2-1)*.2,1,(num_nodes,num_feats)) for i in range(num_samples)]
+        X = [np.random.multivariate_normal( feat_mean[i] + float(mean_weight*(2*Y[i]-1)), np.eye(num_nodes), num_feats).T for i in range(num_samples)]
+        # X = [np.random.multivariate_normal((2*Y[i]-1)*feat_mean[i]*mean_weight,np.eye(num_nodes),num_feats).T for i in range(num_samples)]
     else:
-        X = [np.random.normal(0,1,(num_nodes,num_feats)) for i in range(num_samples)]
-
-    if LINK_LAB_STRUC:
-        A = [erdos_renyi(N=num_nodes,edge_prob=edge_prob) if Y[i] else ksbm(N=num_nodes,k=num_blocks,in_prob=in_prob,out_prob=out_prob) for i in range(num_samples)]
-    else:
-        A = [erdos_renyi(N=num_nodes,edge_prob=edge_prob) for i in range(num_samples)]
-
-    if LINK_SIG_STRUC:
-        filt_taps = np.random.rand(filt_order)
-        filt_taps /= np.sum(filt_taps)
-        H = [np.sum([filt_taps[l]*np.linalg.matrix_power(A[i],l) for l in range(filt_order)],axis=0) for i in range(num_samples)]
-        X = [H[i]@X[i] for i in range(num_samples)]
+        Z = torch.tensor(np.random.binomial(1,.5,num_samples))
+        X = [np.random.multivariate_normal( feat_mean[i] + float(mean_weight*(2*Z[i]-1)), np.eye(num_nodes), num_feats).T for i in range(num_samples)]
+        # X = [np.random.multivariate_normal((2*Z[i]-1)*feat_mean[i]*mean_weight,np.eye(num_nodes),num_feats).T for i in range(num_samples)]
     
     to_tensor = lambda x:torch.tensor(x).float()
     A = list(map(to_tensor,A))
@@ -168,17 +136,16 @@ def generate_synthdata_er_ksbm(num_samples:int, num_feats:int, num_nodes:int,
 # LSE GAE
 
 class NodeFeatData():
-    def __init__(self,N=None,A=None,edge_index=None,F=None,X=None,Y=None):
+    def __init__(self,A=None,edge_index=None,F=None,X=None,Y=None):
         assert A is not None or edge_index is not None, "Must provide graph structure via adjacency matrix `A` or edge list `edge_index`."
         assert ((A is None)-.5)*((edge_index is None)-.5) < 0, "Either provide `A` or `edge_index`, but not both."
         assert X is not None, "Features `X` are missing."
         assert Y is not None, "Label `Y` is missing."
 
         if edge_index is not None:
-            A = to_dense_adj(edge_index, max_num_nodes =N)[0]
+            A = to_dense_adj(edge_index)[0]
         self.A = A
         self.num_nodes = A.shape[0]
-        assert self.num_nodes == N
         self.Ah = A + torch.eye(self.num_nodes)
 
         if F is None:
@@ -192,7 +159,7 @@ class NodeFeatData():
     def plot_F(self, fig_title:str=''):
         fig = plt.figure()
         ax = fig.subplots()
-        ax.imshow(self.F,mycmap)
+        ax.imshow(self.F,madcmap)
         ax.set_xlabel('Feature')
         ax.set_ylabel('Node')
         if len(fig_title)>0:
@@ -695,7 +662,7 @@ class GAE_Experiment:
         assert ind in range(self.num_train_samples)
         fig = plt.figure()
         ax = fig.subplots()
-        ax.imshow(self.F_train_pred[ind],mycmap)
+        ax.imshow(self.F_train_pred[ind],madcmap)
         ax.set_xlabel('Feature')
         ax.set_ylabel('Node')
         if len(fig_title)>0:
@@ -706,7 +673,7 @@ class GAE_Experiment:
         assert ind in range(self.num_val_samples)
         fig = plt.figure()
         ax = fig.subplots()
-        ax.imshow(self.F_val_pred[ind],mycmap)
+        ax.imshow(self.F_val_pred[ind],madcmap)
         ax.set_xlabel('Feature')
         ax.set_ylabel('Node')
         if len(fig_title)>0:

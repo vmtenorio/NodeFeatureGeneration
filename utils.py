@@ -1,9 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import commentjson as json
-import os
 
-mycmap = 'Blues'
+madcmap = 'Reds'
 num_total = 25
 
 blue_base = np.array([.267,.467,.831])
@@ -46,6 +44,31 @@ yellows1 = list((yellow_min[None] + (yellow_base-yellow_min)[None]*np.linspace(0
 yellows2 = list((yellow_base[None] + (yellow_max-yellow_base)[None]*np.linspace(0,1,int((num_total-3)/2)+1)[1:][:,None]))
 yellows += yellows1 + yellows2
 
+purple_base = np.array([.576,.463,.816])
+purple_min = np.array([.812,.757,.980])
+purple_max = np.array([.282,.125,.498])
+purples = [purple_min]
+purples1 = list((purple_min[None] + (purple_base-purple_min)[None]*np.linspace(0,1,int((num_total-3)/2)+1)[1:][:,None]))
+purples2 = list((purple_base[None] + (purple_max-purple_base)[None]*np.linspace(0,1,int((num_total-3)/2)+1)[1:][:,None]))
+purples += purples1 + purples2
+
+def madimshow(mat,cmap:str=madcmap,xlabel:str='',ylabel:str='',set_axis=True,figsize=(4,4),vmin=None,vmax=None):
+    fig = plt.figure(figsize=figsize)
+    ax = fig.subplots()
+    args = {'cmap':cmap}
+    if vmin is not None:
+        args['vmin'] = vmin
+    if vmax is not None:
+        args['vmax'] = vmax
+    ax.imshow(mat,**args)
+    if len(xlabel)>0:
+        ax.set_xlabel(xlabel)
+    if len(ylabel)>0:
+        ax.set_ylabel(ylabel)
+    if not set_axis:
+        ax.axis('off')
+    fig.tight_layout()
+
 # ----------------------------------------
 
 def mat2lowtri(A,N=None):
@@ -67,6 +90,14 @@ def lowtri2mat(a,L=None):
 def vec(X):
     x=np.linalg.vstack(X)
     return x
+
+def kchoose2(k:int):
+    assert k>0, 'Invalid integer.'
+    return int(k*(k-1)/2)
+
+def kchoose3(k:int):
+    assert k>0, 'Invalid integer.'
+    return int(k*(k-1)*(k-2)/6)
 
 # ----------------------------------------
 
@@ -90,33 +121,94 @@ def ksbm(N=20,k=2,in_prob=.8,out_prob=.1,block_assign=None):
     A[np.eye(N)==1]=0
     return A
 
+def W(num_nodes:int=20,graphon_func=None):
+    if graphon_func is None:
+        graphon_func = lambda u: .5*(u[:,None] + u[None])
+    u = np.random.rand(num_nodes)
+    prob_mat = graphon_func(u)
+    return lowtri2mat(np.random.binomial(1,mat2lowtri(prob_mat)))
+
 # ----------------------------------------
 
-def compute_features(A:np.ndarray):
+# TODO: Complete list of local structural features
+LS_FEAT_LIST = ['degree','egonet_dens','egonet_deg','egonet_ratio','nonegonet_ratio','cliques3','clustcoef']
+def compute_ls_feat(A,ls_type:str='degree'):
+    assert ls_type in LS_FEAT_LIST, 'Invalid local structure feature type.'
     (num_nodes,num_nodes) = A.shape
     degs = np.sum(A,axis=0)
     egonet_inds = list(map(lambda i:np.concatenate(([i],np.where(A[i]==1)[0])),np.arange(num_nodes)))
     egonet = list(map(lambda inds:A[inds][:,inds],egonet_inds))
 
+    if ls_type=='degree':
+        return degs
+    elif ls_type=='egonet_dens':
+        return np.array(list(map(np.sum,egonet)))/2
+    elif ls_type=='egonet_deg':
+        return np.array(list(map(lambda inds:np.sum(degs[inds])/2,egonet_inds)))
+    elif ls_type=='egonet_ratio':
+        egonet_dens = np.array(list(map(np.sum,egonet)))/2
+        egonet_deg = np.array(list(map(lambda inds:np.sum(degs[inds]),egonet_inds)))/2
+        return np.array([egonet_dens[i]/egonet_deg[i] if egonet_deg[i]>0 else 0 for i in range(num_nodes)])
+    elif ls_type=='nonegonet_ratio':
+        egonet_dens = np.array(list(map(np.sum,egonet)))/2
+        egonet_deg = np.array(list(map(lambda inds:np.sum(degs[inds]),egonet_inds)))/2
+        return np.array([1 - egonet_dens[i]/egonet_deg[i] if egonet_deg[i]>0 else 0 for i in range(num_nodes)])
+    elif ls_type=='cliques3':
+        return np.diag(np.linalg.matrix_power(A,3))/2
+    elif ls_type=='clustcoef':
+        degs = np.sum(A,axis=0)
+        cliques3 = np.diag(np.linalg.matrix_power(A,3))/2
+        return np.array([2*cliques3[i]/(degs[i]*(degs[i]-1)) if degs[i]>1 else 0 for i in range(num_nodes)])
+    else:
+        print('Invalid local structure feature type.')
+        return
+
+# TODO: Complete list of global structural features. Options may include ratio of triangles, ratio of k-stars, eigendecomposition, pagerank
+GS_FEAT_LIST = ['degree_dist','egonet_dens_ratio','egonet_deg_ratio','cliques3_ratio']
+def compute_gs_feat(A,gs_type:str='degree_dist'):
+    assert gs_type in GS_FEAT_LIST, 'Invalid global structure feature type.'
+    (num_nodes,num_nodes) = A.shape
+    degs = np.sum(A,axis=0)
+    egonet_inds = list(map(lambda i:np.concatenate(([i],np.where(A[i]==1)[0])),np.arange(num_nodes)))
+    egonet = list(map(lambda inds:A[inds][:,inds],egonet_inds))
+
+    if gs_type=='degree_dist':
+        return degs/(num_nodes-1)
+    elif gs_type=='egonet_dens_ratio':
+        return np.array(list(map(np.sum,egonet)))/2/kchoose2(num_nodes)
+    elif gs_type=='egonet_deg_ratio':
+        return np.array(list(map(lambda inds:np.sum(degs[inds])/2,egonet_inds)))/kchoose2(num_nodes)
+    elif gs_type=='cliques3_ratio':
+        return np.diag(np.linalg.matrix_power(A,3))/2/kchoose2(num_nodes-1)
+    # TODO: Include global clustering coefficient
+    else:
+        print('Invalid global structure feature type.')
+        return
+
+# TODO: Normalize features by constant, consistent across all samples in graph dataset
+def compute_features(A:np.ndarray):
+    assert A.shape[0]==A.shape[1], 'Invalid adjacency matrix.'
+    (num_nodes,num_nodes) = A.shape
+    degs = np.sum(A,axis=0)
+    egonet_inds = list(map(lambda i:np.concatenate(([i],np.where(A[i]==1)[0])),np.arange(num_nodes)))
+    egonet = list(map(lambda inds:A[inds][:,inds],egonet_inds))
+    egonet_dens = np.array(list(map(np.sum,egonet)))/2
+    egonet_deg = np.array(list(map(lambda inds:np.sum(degs[inds]),egonet_inds)))/2
+    cliques3 = np.diag(np.linalg.matrix_power(A,3))/2
+
     f = [None]*7
     f[0] = degs
-    f[1] = list(map(np.sum,egonet))
-    f[2] = list(map(lambda inds:np.sum(degs[inds]),egonet_inds))
-    f[3] = [f[1][i]/f[2][i] if f[2][i]>0 else 0 for i in range(num_nodes)]
-    f[4] = [1-f[3][i] if f[2][i]>0 else 0 for i in range(num_nodes)]
-    f[5] = np.diag(np.linalg.matrix_power(A,3))
-    f[6] = [2*f[5][i]/(f[0][i]*(f[0][i]-1)) if f[0][i]>1 else 0 for i in range(num_nodes)]
+    f[1] = egonet_dens
+    f[2] = egonet_deg
+    f[3] = [egonet_dens[i]/egonet_deg[i] if egonet_deg[i]>0 else 0 for i in range(num_nodes)]
+    f[4] = [1-egonet_dens[i]/egonet_deg[i] if egonet_deg[i]>0 else 0 for i in range(num_nodes)]
+    f[5] = cliques3
+    f[6] = [2*cliques3[i]/(degs[i]*(degs[i]-1)) if degs[i]>1 else 0 for i in range(num_nodes)]
     Ft = np.array(f)
-    # scale = np.max(Ft,axis=1)
-    # scale[scale==0] = 1
-    # Ft = Ft/scale[:,None]
 
     Ah = A + np.eye(num_nodes)
     Dh = np.diag(degs+1)
     F = np.concatenate([Ft.T, np.linalg.inv(Dh)@Ah@Ft.T, Ah@Ft.T],axis=1)
-    scale = np.max(F,axis=1)
-    scale[scale==0] = 1
-    F = F/scale[:,None]
 
     return F
 

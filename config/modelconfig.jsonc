@@ -26,7 +26,7 @@
     "batch_val_size": 16,
     "batch_test_size": 16,
 
-    "PRED_FEAT_TYPES": ["true","zeros","ones","random","degree","lse"],
+    "PRED_FEAT_TYPES": ["true","zeros","ones","random","degree","permute","lse"],
     "k_graph": 3,
     "k_node": 3,
 
